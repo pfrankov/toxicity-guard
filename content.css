@@ -1,0 +1,18 @@
+/* Solid white + red outline for flagged inputs; no blur; transition only on toggle */
+input[type="text"], input[type="search"], input[type="url"], input[type="email"], textarea {
+  transition: box-shadow 160ms ease-in-out;
+}
+
+.toxicity-highlight {
+  /* Fallback for sRGB displays/browsers */
+  box-shadow: 0 0 0 3px #ffffff, 0 0 0 7px #ff0000;
+}
+
+@media (color-gamut: p3) {
+  .toxicity-highlight {
+    /* P3 colors for wider-gamut displays (e.g., MacBook) */
+    box-shadow: 0 0 0 3px color(display-p3 1 1 1), 0 0 0 9px color(display-p3 1 0 0);
+  }
+}
+
+

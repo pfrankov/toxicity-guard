@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Toxicity Guard Settings</title>
+    <style>
+      body { font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 24px; }
+      .row { margin-bottom: 16px; }
+      label { display: block; font-weight: 600; margin-bottom: 6px; }
+      input[type="text"], input[type="password"] { width: 520px; max-width: 100%; padding: 8px; }
+      textarea { width: 520px; max-width: 100%; padding: 8px; height: 140px; }
+      .actions { margin-top: 20px; }
+      button { padding: 8px 14px; }
+      .hint { color: #666; font-size: 12px; }
+      .status { margin-top: 8px; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>Settings</h1>
+
+    <div class="row">
+      <label for="apiUrl">OpenAI-like API Base URL</label>
+      <input id="apiUrl" type="text" placeholder="https://api.example.com/v1" />
+      <div class="hint">Provide base URL up to <code>/v1</code>. The extension will call <code>/chat/completions</code> on this base.</div>
+    </div>
+
+    <div class="row">
+      <label for="apiKey">API Key (optional)</label>
+      <input id="apiKey" type="password" placeholder="sk-..." />
+      <div class="hint">If the server requires authorization, the key will be sent in the Authorization: Bearer ... header</div>
+    </div>
+
+    <div class="row">
+      <label for="model">Model name</label>
+      <input id="model" type="text" placeholder="gpt-4o-mini" />
+    </div>
+
+    <div class="row">
+      <label for="prompt">Unhealthy communication criteria (prompt)</label>
+      <textarea id="prompt" placeholder="Describe what you consider undesirable tone or content. The model should return JSON with schema {\"toxic\": boolean, \"reason\": string}."></textarea>
+      <div class="hint">This text will be added to the system instruction during classification. Leave empty for default settings.</div>
+    </div>
+
+    <div class="actions">
+      <button id="save">Save</button>
+      <span class="status" id="status"></span>
+    </div>
+
+    <script src="options.js"></script>
+  </body>
+  </html>
+
+
