@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Toxicity Guard",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Detects toxic text in inputs and highlights with an animated red glow.",
   "icons": {
     "16": "16x16.png",
