@@ -1,0 +1,58 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm run check
+      - run: npm test
+  browser:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check synthetic DOM behavior in Chrome
+        run: |
+          for page in browser browser-integration; do
+            google-chrome --headless --disable-gpu --dump-dom --timeout=10000 \
+              "file://$GITHUB_WORKSPACE/test/$page.html" > "$page-result.html"
+            grep '<pre id="result" data-status="passed">' "$page-result.html"
+          done
+      - name: Package unpacked extension
+        run: |
+          version=$(node -p "require('./manifest.json').version")
+          test "$version" = "$(node -p "require('./package.json').version")"
+          zip -X "toxicity-guard-$version.zip" manifest.json background.js content.js content.css options.html options.js 16x16.png 32x32.png 48x48.png 128x128.png README.md
+          unzip -t "toxicity-guard-$version.zip"
+          sha256sum "toxicity-guard-$version.zip" > SHA256SUMS
+      - name: Install isolated browser test tooling
+        run: |
+          mkdir -p "$RUNNER_TEMP/toxicity-browser-tools"
+          npm install --prefix "$RUNNER_TEMP/toxicity-browser-tools" --ignore-scripts --save-exact playwright@1.63.0
+          "$RUNNER_TEMP/toxicity-browser-tools/node_modules/.bin/playwright" install chromium
+      - name: Smoke-test the packaged MV3 extension
+        run: |
+          unzip -q toxicity-guard-*.zip -d "$RUNNER_TEMP/toxicity-unpacked"
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/toxicity-browser-tools/node_modules/playwright" node test/extension-smoke.cjs "$RUNNER_TEMP/toxicity-unpacked"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: toxicity-guard-package
+          path: |
+            toxicity-guard-*.zip
+            SHA256SUMS
+            *-result.html
+            extension-smoke.png

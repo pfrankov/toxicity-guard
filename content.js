@@ -1,18 +1,32 @@
 // Content script: watches inputs/textarea, debounces text, requests toxicity classification,
-// and toggles a red animated box-shadow when text is toxic.
+// and toggles a red outline when text is toxic.
 
 (function () {
   const HIGHLIGHT_CLASS = 'toxicity-highlight';
   const DEBOUNCE_MS = 500;
 
-  /**
-   * Keep per-element timers and last requested text to avoid stale updates.
-   */
+  const TARGET_SELECTOR = 'input[type="text"], input[type="search"], input[type="url"], input[type="email"], textarea';
   const elementToTimerId = new WeakMap();
-  const elementToLastRequestedText = new WeakMap();
+  const elementToRequest = new WeakMap();
+  const sensitiveElements = new WeakSet();
+  let observer;
+
+  function isPasswordHint(value) {
+    return String(value || '').toLowerCase().split(/\s+/)
+      .some(token => token === 'current-password' || token === 'new-password');
+  }
+
+  function rememberSensitiveElement(el) {
+    if ((el.tagName === 'INPUT' && (el.getAttribute('type') || '').toLowerCase() === 'password') ||
+        ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && isPasswordHint(el.getAttribute('autocomplete')))) {
+      sensitiveElements.add(el);
+    }
+  }
 
   function isTargetElement(node) {
     if (!(node instanceof HTMLElement)) return false;
+    rememberSensitiveElement(node);
+    if (sensitiveElements.has(node) || !node.isConnected || node.matches(':disabled') || node.readOnly) return false;
     if (node.tagName === 'TEXTAREA') return true;
     if (node.tagName === 'INPUT') {
       const type = (node.getAttribute('type') || 'text').toLowerCase();
@@ -35,34 +49,46 @@
     }
   }
 
-  function debounceClassify(el) {
-    const currentText = getElementText(el);
+  function invalidate(el) {
+    clearExistingTimer(el);
+    const request = elementToRequest.get(el);
+    if (request) request.text = '';
+    elementToRequest.delete(el);
+  }
 
-    // If empty, remove highlight immediately and skip classification
-    if (!currentText || currentText.trim().length === 0) {
-      clearExistingTimer(el);
+  function debounceClassify(el) {
+    // Process same-turn type changes before reading a possibly revealed password.
+    processMutations(observer.takeRecords());
+    invalidate(el);
+    if (!isTargetElement(el) || !getElementText(el).trim()) {
       setHighlight(el, false);
-      elementToLastRequestedText.delete(el);
       return;
     }
 
-    clearExistingTimer(el);
     const timerId = setTimeout(() => {
-      elementToLastRequestedText.set(el, currentText);
-      chrome.runtime.sendMessage({ type: 'classify_text', text: currentText }, (response) => {
-        if (!response) return;
-        const latest = getElementText(el);
-        const lastRequested = elementToLastRequestedText.get(el);
-        if (latest !== lastRequested) {
-          // Stale response; ignore
-          return;
-        }
-        if (response.error) {
-          // On error, do not change current highlight state
-          return;
-        }
-        setHighlight(el, Boolean(response.toxic));
-      });
+      processMutations(observer.takeRecords());
+      if (elementToTimerId.get(el) !== timerId) return;
+      elementToTimerId.delete(el);
+      if (!isTargetElement(el)) return;
+      const request = { text: getElementText(el) };
+      if (!request.text.trim()) {
+        setHighlight(el, false);
+        return;
+      }
+      elementToRequest.set(el, request);
+      try {
+        chrome.runtime.sendMessage({ type: 'classify_text', text: request.text }, (response) => {
+          const messagingError = chrome.runtime.lastError;
+          processMutations(observer.takeRecords());
+          if (elementToRequest.get(el) !== request) return;
+          const isCurrent = isTargetElement(el) && getElementText(el) === request.text;
+          invalidate(el);
+          if (!isCurrent || messagingError || !response || response.error || typeof response.toxic !== 'boolean') return;
+          setHighlight(el, response.toxic);
+        });
+      } catch (_) {
+        invalidate(el);
+      }
     }, DEBOUNCE_MS);
 
     elementToTimerId.set(el, timerId);
@@ -84,36 +110,59 @@
     el.addEventListener('input', () => debounceClassify(el), { passive: true });
   }
 
-  function scanExisting() {
-    const nodes = document.querySelectorAll('input[type="text"], input[type="search"], input[type="url"], input[type="email"], textarea');
-    nodes.forEach((n) => attachToElement(n));
+  function scanExisting(root = document) {
+    // Record sensitive controls without attaching or reading their values.
+    root.querySelectorAll('input, textarea').forEach(rememberSensitiveElement);
+    root.querySelectorAll(TARGET_SELECTOR).forEach(attachToElement);
+  }
+
+  function processMutations(mutations) {
+    for (const m of mutations) {
+      if (m.type === 'childList') {
+        m.removedNodes.forEach(node => {
+          if (node instanceof HTMLElement) {
+            invalidate(node);
+            node.querySelectorAll('input, textarea').forEach(invalidate);
+          }
+        });
+        m.addedNodes.forEach((node) => {
+          if (node instanceof HTMLElement) {
+            rememberSensitiveElement(node);
+            attachToElement(node);
+            scanExisting(node);
+          }
+        });
+      } else if (m.type === 'attributes' && m.target instanceof HTMLElement) {
+        const el = m.target;
+        if ((el.tagName === 'INPUT' && m.attributeName === 'type' && String(m.oldValue).toLowerCase() === 'password') ||
+            ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') &&
+             m.attributeName === 'autocomplete' && isPasswordHint(m.oldValue))) {
+          sensitiveElements.add(el);
+        }
+        rememberSensitiveElement(el);
+        invalidate(el);
+        if (!isTargetElement(el)) setHighlight(el, false);
+        if (m.attributeName === 'type' || el.matches(TARGET_SELECTOR)) attachToElement(el);
+        // Disabled fieldsets also disable their controls (except the first legend).
+        if (el.tagName === 'FIELDSET' && m.attributeName === 'disabled') {
+          el.querySelectorAll('input, textarea').forEach(control => {
+            invalidate(control);
+            if (!isTargetElement(control)) setHighlight(control, false);
+            if (control.matches(TARGET_SELECTOR)) attachToElement(control);
+          });
+        }
+      }
+    }
   }
 
   function observeMutations() {
-    const observer = new MutationObserver((mutations) => {
-      for (const m of mutations) {
-        if (m.type === 'childList') {
-          m.addedNodes.forEach((node) => {
-            if (node instanceof HTMLElement) {
-              if (isTargetElement(node)) attachToElement(node);
-              // Also scan descendants for performance/resilience
-              const descendants = node.querySelectorAll?.('input[type="text"], input[type="search"], input[type="url"], input[type="email"], textarea');
-              descendants?.forEach((n) => attachToElement(n));
-            }
-          });
-        } else if (m.type === 'attributes' && m.target instanceof HTMLElement) {
-          if (m.attributeName === 'type' && m.target.tagName === 'INPUT') {
-            attachToElement(m.target);
-          }
-        }
-      }
-    });
-
+    observer = new MutationObserver(processMutations);
     observer.observe(document.documentElement || document.body, {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['type']
+      attributeOldValue: true,
+      attributeFilter: ['type', 'autocomplete', 'disabled', 'readonly']
     });
   }
 
