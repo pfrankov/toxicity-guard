@@ -1,12 +1,17 @@
 {
   "name": "toxicity-guard",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Chrome extension that detects and highlights toxic text in input fields",
   "main": "background.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test test/*.test.cjs",
+    "check": "node --check background.js && node --check content.js && node --check options.js"
   },
-  "keywords": ["chrome-extension", "toxicity-detection", "content-moderation"],
+  "keywords": [
+    "chrome-extension",
+    "toxicity-detection",
+    "content-moderation"
+  ],
   "author": "Pavel Frankov",
   "license": "MIT"
 }

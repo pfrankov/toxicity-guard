@@ -56,7 +56,7 @@ async function classifyTextWithApi(text) {
             toxic: { type: 'boolean' },
             reason: { type: 'string' }
           },
-          required: ['toxic']
+          required: ['toxic', 'reason']
         },
         strict: true
       }
@@ -64,37 +64,14 @@ async function classifyTextWithApi(text) {
   };
 
   try {
-    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const redactedHeaders = Object.fromEntries(
-      Object.entries(headers).map(([k, v]) =>
-        k.toLowerCase() === 'authorization' ? [k, 'Bearer ***'] : [k, v]
-      )
-    );
-
-    console.log('[toxicity-bg]', requestId, 'REQUEST', {
-      url: apiEndpoint,
-      method: 'POST',
-      headers: redactedHeaders,
-      body: JSON.stringify(body).slice(0, 4000)
-    });
-
     const resp = await fetch(apiEndpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify(body)
     });
-    const responseHeaders = {};
-    try { resp.headers.forEach((v, k) => { responseHeaders[k] = v; }); } catch (_) {}
     const textBody = await resp.text();
 
-    console.log('[toxicity-bg]', requestId, 'RESPONSE_META', {
-      status: resp.status,
-      statusText: resp.statusText,
-      headers: responseHeaders
-    });
-
     if (!resp.ok) {
-      console.log('[toxicity-bg]', requestId, 'RESPONSE_BODY', textBody.slice(0, 4000));
       return { error: `http_${resp.status}` , statusText: resp.statusText, body: textBody.slice(0, 800) };
     }
 
@@ -102,7 +79,6 @@ async function classifyTextWithApi(text) {
     try {
       data = textBody ? JSON.parse(textBody) : null;
     } catch (e) {
-      console.log('[toxicity-bg]', requestId, 'JSON_PARSE_ERROR', String(e));
       data = null;
     }
 
@@ -133,14 +109,11 @@ async function classifyTextWithApi(text) {
     }
 
     if (parsed && typeof parsed.toxic === 'boolean') {
-      console.log('[toxicity-bg]', requestId, 'PARSED', parsed);
       return { toxic: Boolean(parsed.toxic), reason: String(parsed.reason || '') };
     }
 
-    console.log('[toxicity-bg]', requestId, 'BAD_RESPONSE_BODY', textBody.slice(0, 4000));
     return { error: 'bad_response' };
   } catch (e) {
-    console.log('[toxicity-bg]', 'NETWORK_ERROR', String(e));
     return { error: 'network_error' };
   }
 }
